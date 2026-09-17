@@ -3,8 +3,10 @@ import { stepPhysics } from './systems/Physics.js';
 import { initParticlePool, stepParticles } from './systems/Particles.js';
 import { updateCamera } from './systems/Camera.js';
 import { injectScripts } from './systems/ScriptEngine.js';
-import { renderTree } from './studio/Explorer.js';
-import { renderProps, updateLiveProps } from './studio/Properties.js';
+
+// Alias imports to prevent shadowing collisions with Engine methods
+import { renderTree as buildExplorerTree } from './studio/Explorer.js';
+import { renderProps as buildInspectorProps, updateLiveProps } from './studio/Properties.js';
 import { syncDOM, saveProjectSVG, loadProjectSVG, exportHTML } from './studio/Viewport.js';
 
 const Engine = {
@@ -45,6 +47,7 @@ const Engine = {
             player.addChild(rbP);
             const cam = new Instance("MainCamera", "Camera");
             player.addChild(cam);
+            
             const script = new Instance("PlayerControl", "Script");
             script.Code = `// Move with Arrow Keys / WASD\nGame.on('Update', (dt) => {\n  let rb = script.Parent.find('Player_Physics');\n  if(Input.isPressed('a') || Input.isPressed('ArrowLeft')) rb.VelocityX = -5;\n  else if(Input.isPressed('d') || Input.isPressed('ArrowRight')) rb.VelocityX = 5;\n  else rb.VelocityX = 0;\n  if((Input.isPressed('w') || Input.isPressed('ArrowUp')) && rb.VelocityY === 0) rb.VelocityY = -12;\n});`;
             player.addChild(script);
@@ -56,11 +59,13 @@ const Engine = {
         window.addEventListener('keydown', e => this.Input.keys.add(e.key.toLowerCase()));
         window.addEventListener('keyup', e => this.Input.keys.delete(e.key.toLowerCase()));
 
+        // Boot systems
         this.bindUI();
-        this.renderTree();
+        this.updateExplorer();
         syncDOM(this);
         
         if (window.IS_EXPORT) setTimeout(() => this.play(), 100);
+        console.log("Engine initialized successfully.");
     },
 
     play() {
@@ -68,7 +73,9 @@ const Engine = {
         this.IsPlaying = true;
         this.DOM.console.style.display = this.DebugMode ? 'block' : 'none';
         this.DOM.console.innerHTML = '';
-        document.getElementById('play-badge').style.display = 'block';
+        
+        const badge = document.getElementById('play-badge');
+        if(badge) badge.style.display = 'block';
 
         Instance.findDeep(this.Workspace, "AudioSource").forEach(a => {
             a._audio = new Audio(a.Src);
@@ -86,15 +93,17 @@ const Engine = {
     stop() {
         this.IsPlaying = false;
         cancelAnimationFrame(this.loop);
-        document.getElementById('play-badge').style.display = 'none';
+        
+        const badge = document.getElementById('play-badge');
+        if(badge) badge.style.display = 'none';
 
         if (this.StateSnapshot) {
             this.Workspace = Instance.deserialize(this.StateSnapshot);
             this.Selected = null;
         }
 
-        this.renderTree();
-        this.renderProps();
+        this.updateExplorer();
+        this.updateInspector();
         syncDOM(this);
         updateCamera(this.Workspace, this.DOM.svg);
     },
@@ -120,6 +129,7 @@ const Engine = {
     },
 
     log(msg, cls) {
+        if(!this.DOM.console) return;
         const el = document.createElement('div');
         el.className = cls; 
         el.innerText = `> ${msg}`;
@@ -127,54 +137,77 @@ const Engine = {
         this.DOM.console.scrollTop = this.DOM.console.scrollHeight;
     },
 
+    // --- UI EVENT BINDING ---
     bindUI() {
         if (window.IS_EXPORT) return;
         
-        document.getElementById('btn-add-obj').onclick = () => this.addNode("VectorPart");
-        document.getElementById('btn-add-rb').onclick = () => this.addNode("RigidBody");
-        document.getElementById('btn-add-cam').onclick = () => this.addNode("Camera");
-        document.getElementById('btn-add-script').onclick = () => this.addNode("Script");
-        document.getElementById('btn-add-filter').onclick = () => this.addNode("SVGFilter");
-        document.getElementById('btn-add-particles').onclick = () => this.addNode("ParticleEmitter");
+        // Helper for safely attaching events
+        const bind = (id, action) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', action);
+        };
 
-        document.getElementById('btn-play').onclick = () => {
+        bind('btn-add-obj', () => this.addNode("VectorPart"));
+        bind('btn-add-rb', () => this.addNode("RigidBody"));
+        bind('btn-add-cam', () => this.addNode("Camera"));
+        bind('btn-add-script', () => this.addNode("Script"));
+        bind('btn-add-filter', () => this.addNode("SVGFilter"));
+        bind('btn-add-particles', () => this.addNode("ParticleEmitter"));
+
+        bind('btn-play', () => {
             document.getElementById('btn-play').style.display = 'none';
             document.getElementById('btn-stop').style.display = 'block';
             this.play();
-        };
-        document.getElementById('btn-stop').onclick = () => {
+        });
+        
+        bind('btn-stop', () => {
             document.getElementById('btn-play').style.display = 'block';
             document.getElementById('btn-stop').style.display = 'none';
             this.stop();
-        };
+        });
 
-        document.getElementById('btn-save-svg').onclick = () => saveProjectSVG(this.Workspace, this.DOM.svg);
+        bind('btn-save-svg', () => saveProjectSVG(this.Workspace, this.DOM.svg));
         
         const fileInput = document.getElementById('file-input-svg');
-        document.getElementById('btn-load-svg').onclick = () => fileInput.click();
-        fileInput.onchange = (e) => {
-            if (e.target.files.length > 0) {
-                loadProjectSVG(e.target.files[0], (state) => {
-                    this.Workspace = Instance.deserialize(state);
-                    this.Selected = null;
-                    this.renderTree();
-                    this.renderProps();
-                    syncDOM(this);
-                });
-            }
-        };
+        bind('btn-load-svg', () => { if (fileInput) fileInput.click(); });
+        
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    loadProjectSVG(e.target.files[0], (state) => {
+                        this.Workspace = Instance.deserialize(state);
+                        this.Selected = null;
+                        this.updateExplorer();
+                        this.updateInspector();
+                        syncDOM(this);
+                    });
+                }
+            });
+        }
 
         const dbgBtn = document.getElementById('btn-debug');
-        dbgBtn.onclick = () => {
-            this.DebugMode = !this.DebugMode;
-            dbgBtn.innerText = `🐞 Debug: ${this.DebugMode ? 'ON' : 'OFF'}`;
-            dbgBtn.style.background = this.DebugMode ? '#d35400' : '#555';
-            syncDOM(this);
-        };
+        if (dbgBtn) {
+            dbgBtn.addEventListener('click', () => {
+                this.DebugMode = !this.DebugMode;
+                dbgBtn.innerText = `🐞 Debug: ${this.DebugMode ? 'ON' : 'OFF'}`;
+                dbgBtn.style.background = this.DebugMode ? '#d35400' : '#555';
+                syncDOM(this);
+            });
+        }
 
-        document.getElementById('btn-close-script').onclick = () => document.getElementById('script-editor').style.display = 'none';
-        document.getElementById('script-textarea').oninput = (e) => { if (this.Selected) this.Selected.Code = e.target.value; };
-        document.getElementById('btn-publish').onclick = () => exportHTML(this.Workspace);
+        bind('btn-close-script', () => {
+            const editor = document.getElementById('script-editor');
+            if (editor) editor.style.display = 'none';
+        });
+
+        const textarea = document.getElementById('script-textarea');
+        if (textarea) {
+            textarea.addEventListener('input', (e) => {
+                if (this.Selected) this.Selected.Code = e.target.value;
+            });
+        }
+        
+        bind('btn-publish', () => exportHTML(this.Workspace));
     },
 
     addNode(cls) {
@@ -185,34 +218,37 @@ const Engine = {
 
     select(inst) {
         this.Selected = inst;
-        this.renderTree();
-        this.renderProps();
+        this.updateExplorer();
+        this.updateInspector();
         syncDOM(this);
 
         const editor = document.getElementById('script-editor');
-        if (inst && inst.className === "Script") {
+        const scriptTitle = document.getElementById('script-title');
+        const scriptArea = document.getElementById('script-textarea');
+
+        if (inst && inst.className === "Script" && editor && scriptTitle && scriptArea) {
             editor.style.display = 'flex';
-            document.getElementById('script-title').innerText = inst.name;
-            document.getElementById('script-textarea').value = inst.Code;
-        } else {
+            scriptTitle.innerText = inst.name;
+            scriptArea.value = inst.Code;
+        } else if (editor) {
             editor.style.display = 'none';
         }
     },
 
-    renderTree() {
-        renderTree(this.Workspace, this.Selected, this.DOM.tree, (node) => this.select(node));
+    updateExplorer() {
+        buildExplorerTree(this.Workspace, this.Selected, this.DOM.tree, (node) => this.select(node));
     },
 
-    renderProps() {
-        renderProps(
+    updateInspector() {
+        buildInspectorProps(
             this.Selected, 
             this.DOM.props, 
-            () => { this.renderTree(); syncDOM(this); },
+            () => { this.updateExplorer(); syncDOM(this); },
             (inst) => {
                 if (inst.parent) inst.parent.removeChild(inst);
                 this.Selected = null;
-                this.renderTree();
-                this.renderProps();
+                this.updateExplorer();
+                this.updateInspector();
                 syncDOM(this);
             }
         );
