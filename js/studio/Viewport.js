@@ -1,4 +1,7 @@
+import { Instance } from '../core/Instance.js';
+
 export function syncDOM(engine) {
+    // ... (Keep existing syncDOM code untouched)
     engine.DOM.root.innerHTML = '';
     engine.DOM.defs.innerHTML = '';
     engine.DOM.debug.innerHTML = '';
@@ -60,6 +63,7 @@ export function syncDOM(engine) {
 }
 
 export function saveProjectSVG(workspace, svgElement) {
+    // ... (Keep existing saveProjectSVG code untouched)
     const jsonState = JSON.stringify(workspace.serialize());
     const cloneSVG = svgElement.cloneNode(true);
     
@@ -82,6 +86,7 @@ export function saveProjectSVG(workspace, svgElement) {
 }
 
 export function loadProjectSVG(file, onCompleteCb) {
+    // ... (Keep existing loadProjectSVG code untouched)
     const reader = new FileReader();
     reader.onload = (e) => {
         const parser = new DOMParser();
@@ -98,6 +103,7 @@ export function loadProjectSVG(file, onCompleteCb) {
 }
 
 export function exportHTML(workspace) {
+    // ... (Keep existing exportHTML code untouched)
     const rawHTML = document.documentElement.outerHTML;
     const jsonState = JSON.stringify(workspace.serialize());
     
@@ -110,4 +116,68 @@ export function exportHTML(workspace) {
     a.href = URL.createObjectURL(blob);
     a.download = `GameExport_${Date.now()}.html`;
     a.click();
+}
+
+// --- NEW FEATURE: RAW SVG PARSER ---
+export function importRawSVG(file, onCompleteCb) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(e.target.result, "image/svg+xml");
+        
+        const cleanName = file.name.replace(/\.[^/.]+$/, "");
+        const rootFolder = new Instance(`Asset_${cleanName}`, "Folder");
+
+        const parseNode = (svgNode, parentInst) => {
+            if (svgNode.nodeType !== 1) return; // Skip non-elements (text, comments)
+            
+            const tag = svgNode.tagName.toLowerCase();
+            let inst = null;
+            
+            if (tag === 'g' || tag === 'svg') {
+                if (tag === 'g') {
+                    inst = new Instance(svgNode.id || "Group", "Folder");
+                    parentInst.addChild(inst);
+                } else {
+                    inst = parentInst; // Pass through root node directly
+                }
+                Array.from(svgNode.children).forEach(child => parseNode(child, inst));
+            } 
+            else if (tag === 'rect') {
+                inst = new Instance(svgNode.id || "Rect", "VectorPart");
+                inst.Type = "rect";
+                
+                const w = parseFloat(svgNode.getAttribute('width') || 50);
+                const h = parseFloat(svgNode.getAttribute('height') || 50);
+                const x = parseFloat(svgNode.getAttribute('x') || 0);
+                const y = parseFloat(svgNode.getAttribute('y') || 0);
+                
+                inst.W = w; inst.H = h;
+                inst.X = x + (w / 2); // Shift top-left to Engine's center coordinates
+                inst.Y = y + (h / 2);
+                inst.Color = svgNode.getAttribute('fill') || '#cccccc';
+                
+                parentInst.addChild(inst);
+            }
+            else if (tag === 'circle' || tag === 'ellipse') {
+                inst = new Instance(svgNode.id || "Circle", "VectorPart");
+                inst.Type = "circle";
+                
+                // Average radii if it's an ellipse, otherwise use standard r
+                const r = parseFloat(svgNode.getAttribute('r') || svgNode.getAttribute('rx') || 25); 
+                const cx = parseFloat(svgNode.getAttribute('cx') || 0);
+                const cy = parseFloat(svgNode.getAttribute('cy') || 0);
+                
+                inst.W = r * 2; inst.H = r * 2; // Engine defines circle size via bounding width/height
+                inst.X = cx; inst.Y = cy;
+                inst.Color = svgNode.getAttribute('fill') || '#cccccc';
+                
+                parentInst.addChild(inst);
+            }
+        };
+
+        parseNode(doc.documentElement, rootFolder);
+        onCompleteCb(rootFolder);
+    };
+    reader.readAsText(file);
 }

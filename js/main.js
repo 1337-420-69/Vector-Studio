@@ -4,10 +4,9 @@ import { initParticlePool, stepParticles } from './systems/Particles.js';
 import { updateCamera } from './systems/Camera.js';
 import { injectScripts } from './systems/ScriptEngine.js';
 
-// Alias imports to prevent shadowing collisions with Engine methods
 import { renderTree as buildExplorerTree } from './studio/Explorer.js';
 import { renderProps as buildInspectorProps, updateLiveProps } from './studio/Properties.js';
-import { syncDOM, saveProjectSVG, loadProjectSVG, exportHTML } from './studio/Viewport.js';
+import { syncDOM, saveProjectSVG, loadProjectSVG, exportHTML, importRawSVG } from './studio/Viewport.js'; // Added importRawSVG
 
 const Engine = {
     Workspace: new Instance("Workspace", "Folder"),
@@ -59,7 +58,6 @@ const Engine = {
         window.addEventListener('keydown', e => this.Input.keys.add(e.key.toLowerCase()));
         window.addEventListener('keyup', e => this.Input.keys.delete(e.key.toLowerCase()));
 
-        // Boot systems
         this.bindUI();
         this.updateExplorer();
         syncDOM(this);
@@ -76,6 +74,9 @@ const Engine = {
         
         const badge = document.getElementById('play-badge');
         if(badge) badge.style.display = 'block';
+
+        // BUG FIX: Completely rebuild the event bus to clear out old script listeners
+        this.Bus = new EventTarget(); 
 
         Instance.findDeep(this.Workspace, "AudioSource").forEach(a => {
             a._audio = new Audio(a.Src);
@@ -137,11 +138,9 @@ const Engine = {
         this.DOM.console.scrollTop = this.DOM.console.scrollHeight;
     },
 
-    // --- UI EVENT BINDING ---
     bindUI() {
         if (window.IS_EXPORT) return;
         
-        // Helper for safely attaching events
         const bind = (id, action) => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('click', action);
@@ -181,6 +180,24 @@ const Engine = {
                         this.updateInspector();
                         syncDOM(this);
                     });
+                    e.target.value = ''; // Reset input to allow reloading same file
+                }
+            });
+        }
+
+        // NEW FEATURE: Binding SVG Import logic
+        const importInput = document.getElementById('file-input-import');
+        bind('btn-import-svg', () => { if (importInput) importInput.click(); });
+
+        if (importInput) {
+            importInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    importRawSVG(e.target.files[0], (importedFolder) => {
+                        this.Workspace.addChild(importedFolder);
+                        this.updateExplorer();
+                        syncDOM(this);
+                    });
+                    e.target.value = ''; // Reset input
                 }
             });
         }
