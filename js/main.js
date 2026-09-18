@@ -67,50 +67,65 @@ const Engine = {
     },
 
     play() {
-        this.StateSnapshot = this.Workspace.serialize();
+        if (this.IsPlaying) return;
         this.IsPlaying = true;
-        this.DOM.console.style.display = this.DebugMode ? 'block' : 'none';
-        this.DOM.console.innerHTML = '';
+        
+        // Serialize state for resetting later
+        this.StateSnapshot = JSON.stringify(this.Workspace.serialize());
         
         const badge = document.getElementById('play-badge');
         if(badge) badge.style.display = 'block';
 
-        // BUG FIX: Completely rebuild the event bus to clear out old script listeners
-        this.Bus = new EventTarget(); 
-
-        Instance.findDeep(this.Workspace, "AudioSource").forEach(a => {
-            a._audio = new Audio(a.Src);
-            if (a.PlayOnStart) a._audio.play();
-        });
-
-        injectScripts(this.Workspace, this.Bus, this.Input, (m, c) => this.log(m, c));
-        this.emit('Init');
-
-        this.ParticleState = initParticlePool(this.DOM.particles);
+        // FIX: Explicitly capture the start time so the first frame's dt calculation is valid
         this.lastTime = performance.now();
-        this.loop = requestAnimationFrame((t) => this.tick(t));
-    },
+        
+        // Start the engine loop properly with a valid timestamp
+        this.loop(this.lastTime);
+    }
+
+    loop(time) {
+        if (!this.IsPlaying) return;
+        
+        // Fallback for missing time arguments
+        if (time === undefined) time = performance.now();
+
+        // Calculate delta time in seconds
+        let dt = (time - (this.lastTime || time)) / 1000;
+        
+        // FIX: Cap dt to 0.1s (10 FPS) to avoid physics bodies tunneling or 
+        // shooting to infinity when switching browser tabs or lagging
+        if (dt > 0.1) dt = 0.1; 
+        
+        this.lastTime = time;
+
+        this.tick(dt);
+        
+        // Store loopId so it can be cleanly cancelled
+        this.loopId = requestAnimationFrame((t) => this.loop(t));
+    }
 
     stop() {
         this.emit('EngineStop'); 
         this.IsPlaying = false;
-        cancelAnimationFrame(this.loop);
+        
+        if (this.loopId) cancelAnimationFrame(this.loopId);
+        
+        // FIX: Clear time tracking so subsequent plays don't calculate massive time jumps
+        this.lastTime = null; 
         
         const badge = document.getElementById('play-badge');
         if(badge) badge.style.display = 'none';
 
         if (this.StateSnapshot) {
-            this.Workspace = Instance.deserialize(this.StateSnapshot);
-            
-            // FIX: Use select(null) to properly detach the UI and hide the script editor
-            // so edits aren't lost in a null reference.
+            const parsed = JSON.parse(this.StateSnapshot);
+            this.Workspace = Instance.deserialize(parsed);
             this.select(null); 
         } else {
             this.select(null);
         }
 
         updateCamera(this.Workspace, this.DOM.svg);
-    },
+    }
 
     tick(time) {
         if (!this.IsPlaying) return;
