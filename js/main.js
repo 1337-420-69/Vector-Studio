@@ -92,7 +92,7 @@ const Engine = {
     },
 
     stop() {
-        this.emit('EngineStop'); // NEW: Fire kill-signal to script timers
+        this.emit('EngineStop'); 
         this.IsPlaying = false;
         cancelAnimationFrame(this.loop);
         
@@ -101,12 +101,14 @@ const Engine = {
 
         if (this.StateSnapshot) {
             this.Workspace = Instance.deserialize(this.StateSnapshot);
-            this.Selected = null;
+            
+            // FIX: Use select(null) to properly detach the UI and hide the script editor
+            // so edits aren't lost in a null reference.
+            this.select(null); 
+        } else {
+            this.select(null);
         }
 
-        this.updateExplorer();
-        this.updateInspector();
-        syncDOM(this);
         updateCamera(this.Workspace, this.DOM.svg);
     },
 
