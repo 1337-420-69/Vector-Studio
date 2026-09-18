@@ -92,6 +92,7 @@ const Engine = {
     },
 
     stop() {
+        this.emit('EngineStop'); // NEW: Fire kill-signal to script timers
         this.IsPlaying = false;
         cancelAnimationFrame(this.loop);
         

@@ -1,7 +1,6 @@
 import { Instance } from '../core/Instance.js';
 
 export function syncDOM(engine) {
-    // ... (Keep existing syncDOM code untouched)
     engine.DOM.root.innerHTML = '';
     engine.DOM.defs.innerHTML = '';
     engine.DOM.debug.innerHTML = '';
@@ -9,6 +8,39 @@ export function syncDOM(engine) {
     const walk = (inst, parentNode) => {
         let node = parentNode;
         
+        // Generic Figma SVG Node Renderer
+        if (inst.className === "SVGNode") {
+            node = document.createElementNS("http://www.w3.org/2000/svg", inst.Tag);
+            node.id = inst.uuid;
+            
+            if (inst.Attributes) {
+                for (const [key, val] of Object.entries(inst.Attributes)) {
+                    node.setAttribute(key, val);
+                }
+            }
+            
+            if (inst.TextContent) {
+                node.textContent = inst.TextContent;
+            }
+            
+            if (!engine.IsPlaying) {
+                node.style.cursor = "pointer";
+                node.onclick = (e) => { e.stopPropagation(); engine.select(inst); };
+                if (engine.Selected === inst) {
+                    node.style.outline = "2px dashed #00ff00"; // Outline used instead of stroke to preserve complex paths
+                }
+            }
+            
+            // Route definitions to <defs>, renderable graphics to <g> root
+            const defTags = ['defs', 'mask', 'clippath', 'lineargradient', 'radialgradient', 'pattern', 'filter'];
+            if (defTags.includes(inst.Tag.toLowerCase())) {
+                engine.DOM.defs.appendChild(node);
+            } else {
+                parentNode.appendChild(node);
+            }
+        }
+
+        // Legacy / Engine Primitive Renderer
         if (inst.className === "SVGFilter") {
             const flt = document.createElementNS("http://www.w3.org/2000/svg", "filter");
             flt.id = inst.uuid;
@@ -36,23 +68,23 @@ export function syncDOM(engine) {
             if (!engine.IsPlaying) {
                 node.style.cursor = "pointer";
                 node.onclick = (e) => { e.stopPropagation(); engine.select(inst); };
-                if (engine.Selected === inst) {
-                    node.style.stroke = "#0f0";
-                    node.style.strokeWidth = "2";
-                }
+                if (engine.Selected === inst) node.style.stroke = "#0f0";
             }
             parentNode.appendChild(node);
         }
 
-        if (engine.DebugMode && inst.className === "RigidBody" && inst.parent && inst.parent.className === "VectorPart") {
+        // Debug RigidBody rendering
+        if (engine.DebugMode && inst.className === "RigidBody" && inst.parent) {
             const dbg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-            dbg.setAttribute('x', inst.parent.X - inst.ColliderW/2); 
-            dbg.setAttribute('y', inst.parent.Y - inst.ColliderH/2);
-            dbg.setAttribute('width', inst.ColliderW); 
-            dbg.setAttribute('height', inst.ColliderH);
-            dbg.setAttribute('fill', 'none'); 
-            dbg.setAttribute('stroke', '#f00'); 
-            dbg.setAttribute('stroke-width', '1.5');
+            const w = inst.ColliderW || (inst.parent.W || 50);
+            const h = inst.ColliderH || (inst.parent.H || 50);
+            // Default assumes engine primitives; for SVGNodes user must manually align physics
+            const x = (inst.parent.X || 0) - w/2;
+            const y = (inst.parent.Y || 0) - h/2;
+            
+            dbg.setAttribute('x', x); dbg.setAttribute('y', y);
+            dbg.setAttribute('width', w); dbg.setAttribute('height', h);
+            dbg.setAttribute('fill', 'none'); dbg.setAttribute('stroke', '#f00'); 
             engine.DOM.debug.appendChild(dbg);
         }
 
@@ -63,7 +95,6 @@ export function syncDOM(engine) {
 }
 
 export function saveProjectSVG(workspace, svgElement) {
-    // ... (Keep existing saveProjectSVG code untouched)
     const jsonState = JSON.stringify(workspace.serialize());
     const cloneSVG = svgElement.cloneNode(true);
     
@@ -86,27 +117,23 @@ export function saveProjectSVG(workspace, svgElement) {
 }
 
 export function loadProjectSVG(file, onCompleteCb) {
-    // ... (Keep existing loadProjectSVG code untouched)
     const reader = new FileReader();
     reader.onload = (e) => {
         const parser = new DOMParser();
         const doc = parser.parseFromString(e.target.result, "image/svg+xml");
         const metadata = doc.querySelector('metadata#engine-data');
         if (metadata && metadata.textContent) {
-            const parsedData = JSON.parse(metadata.textContent);
-            onCompleteCb(parsedData);
+            onCompleteCb(JSON.parse(metadata.textContent));
         } else {
-            alert("No embedded engine project state found in this SVG file!");
+            alert("No embedded engine project state found in this SVG file.");
         }
     };
     reader.readAsText(file);
 }
 
 export function exportHTML(workspace) {
-    // ... (Keep existing exportHTML code untouched)
     const rawHTML = document.documentElement.outerHTML;
     const jsonState = JSON.stringify(workspace.serialize());
-    
     const exportContent = rawHTML
         .replace('</body>', `<script>window.IS_EXPORT=true; window.EXPORT_DATA=${jsonState};<\/script></body>`)
         .replace('<body', '<body class="export-mode"');
@@ -118,7 +145,7 @@ export function exportHTML(workspace) {
     a.click();
 }
 
-// --- NEW FEATURE: RAW SVG PARSER ---
+// Full 1:1 Universal SVG Importer for Figma files
 export function importRawSVG(file, onCompleteCb) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -129,51 +156,28 @@ export function importRawSVG(file, onCompleteCb) {
         const rootFolder = new Instance(`Asset_${cleanName}`, "Folder");
 
         const parseNode = (svgNode, parentInst) => {
-            if (svgNode.nodeType !== 1) return; // Skip non-elements (text, comments)
-            
-            const tag = svgNode.tagName.toLowerCase();
-            let inst = null;
-            
-            if (tag === 'g' || tag === 'svg') {
-                if (tag === 'g') {
-                    inst = new Instance(svgNode.id || "Group", "Folder");
-                    parentInst.addChild(inst);
-                } else {
-                    inst = parentInst; // Pass through root node directly
-                }
-                Array.from(svgNode.children).forEach(child => parseNode(child, inst));
-            } 
-            else if (tag === 'rect') {
-                inst = new Instance(svgNode.id || "Rect", "VectorPart");
-                inst.Type = "rect";
-                
-                const w = parseFloat(svgNode.getAttribute('width') || 50);
-                const h = parseFloat(svgNode.getAttribute('height') || 50);
-                const x = parseFloat(svgNode.getAttribute('x') || 0);
-                const y = parseFloat(svgNode.getAttribute('y') || 0);
-                
-                inst.W = w; inst.H = h;
-                inst.X = x + (w / 2); // Shift top-left to Engine's center coordinates
-                inst.Y = y + (h / 2);
-                inst.Color = svgNode.getAttribute('fill') || '#cccccc';
-                
-                parentInst.addChild(inst);
+            if (svgNode.nodeType !== 1) return; // Skip non-elements (text nodes, comments)
+            if (svgNode.tagName.toLowerCase() === 'svg') {
+                Array.from(svgNode.children).forEach(child => parseNode(child, parentInst));
+                return;
             }
-            else if (tag === 'circle' || tag === 'ellipse') {
-                inst = new Instance(svgNode.id || "Circle", "VectorPart");
-                inst.Type = "circle";
-                
-                // Average radii if it's an ellipse, otherwise use standard r
-                const r = parseFloat(svgNode.getAttribute('r') || svgNode.getAttribute('rx') || 25); 
-                const cx = parseFloat(svgNode.getAttribute('cx') || 0);
-                const cy = parseFloat(svgNode.getAttribute('cy') || 0);
-                
-                inst.W = r * 2; inst.H = r * 2; // Engine defines circle size via bounding width/height
-                inst.X = cx; inst.Y = cy;
-                inst.Color = svgNode.getAttribute('fill') || '#cccccc';
-                
-                parentInst.addChild(inst);
+
+            const tag = svgNode.tagName;
+            const inst = new Instance(svgNode.id || tag, "SVGNode");
+            inst.Tag = tag;
+            inst.Attributes = {};
+            
+            // Extract every raw attribute (d-paths, stroke-width, matrices, mask refs)
+            Array.from(svgNode.attributes).forEach(attr => {
+                if (attr.name !== 'id') inst.Attributes[attr.name] = attr.value;
+            });
+
+            if (svgNode.children.length === 0 && svgNode.textContent.trim() !== '') {
+                inst.TextContent = svgNode.textContent.trim();
             }
+            
+            parentInst.addChild(inst);
+            Array.from(svgNode.children).forEach(child => parseNode(child, inst));
         };
 
         parseNode(doc.documentElement, rootFolder);
