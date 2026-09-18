@@ -11,14 +11,10 @@ export function syncDOM(engine) {
         // Generic & Raster SVG Node Renderer
         if (inst.className === "SVGNode") {
             node = document.createElementNS("http://www.w3.org/2000/svg", inst.Tag);
-            
-            // CRITICAL FIX: Preserve original Figma IDs for internal SVG referencing (e.g. fill="url(#id)")
-            node.id = (inst.Attributes && inst.Attributes.id) ? inst.Attributes.id : inst.uuid;
+            node.id = inst.uuid;
             
             if (inst.Attributes) {
                 for (const [key, val] of Object.entries(inst.Attributes)) {
-                    if (key === 'id') continue; // Already set above
-                    
                     // Handle XML namespaces for embedded PNGs and xlink references
                     if (key.includes(':')) {
                         const parts = key.split(':');
@@ -72,21 +68,11 @@ export function syncDOM(engine) {
             node.setAttribute('fill', inst.Color);
             if (inst.FilterID) node.setAttribute('filter', `url(#${inst.FilterID})`);
             
-            // CRITICAL FIX: Safe numeric casting to prevent NaN layout crashes during physics simulation
-            const ix = Number(inst.X) || 0;
-            const iy = Number(inst.Y) || 0;
-            const iw = Number(inst.W) || 0;
-            const ih = Number(inst.H) || 0;
-
             if (inst.Type === "circle") {
-                node.setAttribute('cx', ix); 
-                node.setAttribute('cy', iy); 
-                node.setAttribute('r', iw/2);
+                node.setAttribute('cx', inst.X); node.setAttribute('cy', inst.Y); node.setAttribute('r', inst.W/2);
             } else {
-                node.setAttribute('x', ix - iw/2); 
-                node.setAttribute('y', iy - ih/2);
-                node.setAttribute('width', iw); 
-                node.setAttribute('height', ih);
+                node.setAttribute('x', inst.X - inst.W/2); node.setAttribute('y', inst.Y - inst.H/2);
+                node.setAttribute('width', inst.W); node.setAttribute('height', inst.H);
             }
             
             if (!engine.IsPlaying) {
@@ -100,18 +86,14 @@ export function syncDOM(engine) {
         // Debug Physics Rendering
         if (engine.DebugMode && inst.className === "RigidBody" && inst.parent) {
             const dbg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            const w = inst.ColliderW || (inst.parent.W || 50);
+            const h = inst.ColliderH || (inst.parent.H || 50);
+            const x = (inst.parent.X || 0) - w/2;
+            const y = (inst.parent.Y || 0) - h/2;
             
-            const w = Number(inst.ColliderW !== undefined ? inst.ColliderW : inst.parent.W) || 50;
-            const h = Number(inst.ColliderH !== undefined ? inst.ColliderH : inst.parent.H) || 50;
-            const px = Number(inst.parent.X) || 0;
-            const py = Number(inst.parent.Y) || 0;
-            
-            dbg.setAttribute('x', px - w/2); 
-            dbg.setAttribute('y', py - h/2);
-            dbg.setAttribute('width', w); 
-            dbg.setAttribute('height', h);
-            dbg.setAttribute('fill', 'none'); 
-            dbg.setAttribute('stroke', '#f00'); 
+            dbg.setAttribute('x', x); dbg.setAttribute('y', y);
+            dbg.setAttribute('width', w); dbg.setAttribute('height', h);
+            dbg.setAttribute('fill', 'none'); dbg.setAttribute('stroke', '#f00'); 
             engine.DOM.debug.appendChild(dbg);
         }
 
@@ -193,10 +175,9 @@ export function importRawSVG(file, onCompleteCb) {
             inst.Tag = tag;
             inst.Attributes = {};
             
-            // FIX: Retain ALL raw attributes including 'id'. 
-            // Figma relies heavily on ID matching for patterns and images to render!
+            // Retain all raw attributes including embedded base64 image hrefs
             Array.from(svgNode.attributes).forEach(attr => {
-                inst.Attributes[attr.name] = attr.value;
+                if (attr.name !== 'id') inst.Attributes[attr.name] = attr.value;
             });
 
             if (svgNode.children.length === 0 && svgNode.textContent.trim() !== '') {
