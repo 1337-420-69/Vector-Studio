@@ -8,14 +8,24 @@ export function syncDOM(engine) {
     const walk = (inst, parentNode) => {
         let node = parentNode;
         
-        // Generic Figma SVG Node Renderer
+        // Generic & Raster SVG Node Renderer
         if (inst.className === "SVGNode") {
             node = document.createElementNS("http://www.w3.org/2000/svg", inst.Tag);
             node.id = inst.uuid;
             
             if (inst.Attributes) {
                 for (const [key, val] of Object.entries(inst.Attributes)) {
-                    node.setAttribute(key, val);
+                    // Handle XML namespaces for embedded PNGs and xlink references
+                    if (key.includes(':')) {
+                        const parts = key.split(':');
+                        if (parts[0] === 'xlink') {
+                            node.setAttributeNS("http://www.w3.org/1999/xlink", parts[1], val);
+                        } else {
+                            node.setAttribute(key, val);
+                        }
+                    } else {
+                        node.setAttribute(key, val);
+                    }
                 }
             }
             
@@ -27,11 +37,11 @@ export function syncDOM(engine) {
                 node.style.cursor = "pointer";
                 node.onclick = (e) => { e.stopPropagation(); engine.select(inst); };
                 if (engine.Selected === inst) {
-                    node.style.outline = "2px dashed #00ff00"; // Outline used instead of stroke to preserve complex paths
+                    node.style.outline = "2px dashed #00ff00";
                 }
             }
             
-            // Route definitions to <defs>, renderable graphics to <g> root
+            // Route definitions to <defs>, renderable graphics/images to scene root
             const defTags = ['defs', 'mask', 'clippath', 'lineargradient', 'radialgradient', 'pattern', 'filter'];
             if (defTags.includes(inst.Tag.toLowerCase())) {
                 engine.DOM.defs.appendChild(node);
@@ -40,7 +50,7 @@ export function syncDOM(engine) {
             }
         }
 
-        // Legacy / Engine Primitive Renderer
+        // Engine Primitive Renderer
         if (inst.className === "SVGFilter") {
             const flt = document.createElementNS("http://www.w3.org/2000/svg", "filter");
             flt.id = inst.uuid;
@@ -73,12 +83,11 @@ export function syncDOM(engine) {
             parentNode.appendChild(node);
         }
 
-        // Debug RigidBody rendering
+        // Debug Physics Rendering
         if (engine.DebugMode && inst.className === "RigidBody" && inst.parent) {
             const dbg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
             const w = inst.ColliderW || (inst.parent.W || 50);
             const h = inst.ColliderH || (inst.parent.H || 50);
-            // Default assumes engine primitives; for SVGNodes user must manually align physics
             const x = (inst.parent.X || 0) - w/2;
             const y = (inst.parent.Y || 0) - h/2;
             
@@ -145,7 +154,6 @@ export function exportHTML(workspace) {
     a.click();
 }
 
-// Full 1:1 Universal SVG Importer for Figma files
 export function importRawSVG(file, onCompleteCb) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -156,7 +164,7 @@ export function importRawSVG(file, onCompleteCb) {
         const rootFolder = new Instance(`Asset_${cleanName}`, "Folder");
 
         const parseNode = (svgNode, parentInst) => {
-            if (svgNode.nodeType !== 1) return; // Skip non-elements (text nodes, comments)
+            if (svgNode.nodeType !== 1) return;
             if (svgNode.tagName.toLowerCase() === 'svg') {
                 Array.from(svgNode.children).forEach(child => parseNode(child, parentInst));
                 return;
@@ -167,7 +175,7 @@ export function importRawSVG(file, onCompleteCb) {
             inst.Tag = tag;
             inst.Attributes = {};
             
-            // Extract every raw attribute (d-paths, stroke-width, matrices, mask refs)
+            // Retain all raw attributes including embedded base64 image hrefs
             Array.from(svgNode.attributes).forEach(attr => {
                 if (attr.name !== 'id') inst.Attributes[attr.name] = attr.value;
             });
