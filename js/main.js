@@ -227,7 +227,7 @@ const Engine = {
             });
         }
         
-        bind('btn-publish', () => exportHTML(this.Workspace));
+        bind('btn-publish', async () => await exportHTML(this.Workspace));
     },
 
     addNode(cls) {
