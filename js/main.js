@@ -6,7 +6,8 @@ import { injectScripts } from './systems/ScriptEngine.js';
 
 import { renderTree as buildExplorerTree } from './studio/Explorer.js';
 import { renderProps as buildInspectorProps, updateLiveProps } from './studio/Properties.js';
-import { syncDOM, saveProjectSVG, loadProjectSVG, exportHTML, importRawSVG } from './studio/Viewport.js'; // Added importRawSVG
+import { syncDOM, saveProjectSVG, loadProjectSVG, exportHTML, importRawSVG } from './studio/Viewport.js';
+import { EditorCamera } from './studio/EditorCamera.js'; // Added importRawSVG
 
 window.Instance = Instance;
 
@@ -18,6 +19,8 @@ const Engine = {
     StateSnapshot: null,
     ParticleState: { pool: [], active: [] },
     DOM: {},
+    EditorCamera: null,
+    EditorCameraState: null,
 
     Bus: new EventTarget(),
     Input: { keys: new Set(), isPressed: (k) => Engine.Input.keys.has(k.toLowerCase()) },
@@ -31,7 +34,8 @@ const Engine = {
             debug: document.getElementById('debug-root'),
             console: document.getElementById('console-overlay'),
             tree: document.getElementById('tree-root'),
-            props: document.getElementById('prop-root')
+            props: document.getElementById('prop-root'),
+            viewport: document.getElementById('viewport')
         };
 
         if (!window.EXPORT_DATA) {
@@ -60,6 +64,11 @@ const Engine = {
         window.addEventListener('keydown', e => this.Input.keys.add(e.key.toLowerCase()));
         window.addEventListener('keyup', e => this.Input.keys.delete(e.key.toLowerCase()));
 
+        if (!window.IS_EXPORT) {
+            this.EditorCamera = new EditorCamera(this.DOM.viewport, this.DOM.svg);
+            this.EditorCamera.bindKeyEvents();
+        }
+
         this.bindUI();
         this.updateExplorer();
         syncDOM(this);
@@ -70,6 +79,12 @@ const Engine = {
 
     play() {
         this.StateSnapshot = this.Workspace.serialize();
+        
+        if (this.EditorCamera) {
+            this.EditorCameraState = this.EditorCamera.saveState();
+            this.EditorCamera.unbindKeyEvents();
+        }
+        
         this.IsPlaying = true;
         this.DOM.console.style.display = this.DebugMode ? 'block' : 'none';
         this.DOM.console.innerHTML = '';
@@ -77,7 +92,6 @@ const Engine = {
         const badge = document.getElementById('play-badge');
         if(badge) badge.style.display = 'block';
 
-        // BUG FIX: Completely rebuild the event bus to clear out old script listeners
         this.Bus = new EventTarget(); 
 
         Instance.findDeep(this.Workspace, "AudioSource").forEach(a => {
@@ -104,14 +118,15 @@ const Engine = {
         if (this.StateSnapshot) {
             this.Workspace = Instance.deserialize(this.StateSnapshot);
             
-            // FIX: Use select(null) to properly detach the UI and hide the script editor
-            // so edits aren't lost in a null reference.
             this.select(null); 
         } else {
             this.select(null);
         }
 
-        updateCamera(this.Workspace, this.DOM.svg);
+        if (this.EditorCamera && this.EditorCameraState) {
+            this.EditorCamera.restoreState(this.EditorCameraState);
+            this.EditorCamera.bindKeyEvents();
+        }
     },
 
     tick(time) {
