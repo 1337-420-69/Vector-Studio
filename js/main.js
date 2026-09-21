@@ -8,6 +8,8 @@ import { renderTree as buildExplorerTree } from './studio/Explorer.js';
 import { renderProps as buildInspectorProps, updateLiveProps } from './studio/Properties.js';
 import { syncDOM, saveProjectSVG, loadProjectSVG, exportHTML, importRawSVG } from './studio/Viewport.js'; // Added importRawSVG
 
+window.Instance = Instance;
+
 const Engine = {
     Workspace: new Instance("Workspace", "Folder"),
     IsPlaying: false,
