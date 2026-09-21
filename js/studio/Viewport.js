@@ -5,10 +5,78 @@ export function syncDOM(engine) {
     engine.DOM.defs.innerHTML = '';
     engine.DOM.debug.innerHTML = '';
 
+    const renderedGradients = new Set();
+    const renderedPatterns = new Set();
+    let animationStyleInjected = false;
+    
     const walk = (inst, parentNode) => {
         let node = parentNode;
         
-        // Generic Figma SVG Node Renderer
+        if (inst.className === "Animation" && !animationStyleInjected) {
+            let styleEl = engine.DOM.defs.querySelector('style#animation-styles');
+            if (!styleEl) {
+                styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
+                styleEl.id = "animation-styles";
+                engine.DOM.defs.appendChild(styleEl);
+            }
+            styleEl.textContent = inst.CSSText || "";
+            animationStyleInjected = true;
+            return;
+        }
+        
+        if (inst.className === "UIGradient") {
+            if (renderedGradients.has(inst.uuid)) return;
+            renderedGradients.add(inst.uuid);
+            
+            let gradEl;
+            if (inst.Type === "Linear") {
+                gradEl = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+                gradEl.setAttribute('x1', inst.X1 || "0%");
+                gradEl.setAttribute('y1', inst.Y1 || "0%");
+                gradEl.setAttribute('x2', inst.X2 || "100%");
+                gradEl.setAttribute('y2', inst.Y2 || "0%");
+            } else {
+                gradEl = document.createElementNS("http://www.w3.org/2000/svg", "radialGradient");
+                gradEl.setAttribute('cx', inst.CX || "50%");
+                gradEl.setAttribute('cy', inst.CY || "50%");
+                gradEl.setAttribute('r', inst.R || "50%");
+            }
+            
+            gradEl.id = inst.uuid;
+            if (inst.Transform) gradEl.setAttribute('gradientTransform', inst.Transform);
+            if (inst.Units) gradEl.setAttribute('gradientUnits', inst.Units);
+            
+            if (inst.ColorStops && Array.isArray(inst.ColorStops)) {
+                inst.ColorStops.forEach(stop => {
+                    const stopEl = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+                    stopEl.setAttribute('offset', stop.offset || "0%");
+                    stopEl.setAttribute('stop-color', stop.color || "#000");
+                    if (stop.opacity) stopEl.setAttribute('stop-opacity', stop.opacity);
+                    gradEl.appendChild(stopEl);
+                });
+            }
+            
+            engine.DOM.defs.appendChild(gradEl);
+            return;
+        }
+        
+        if (inst.className === "Pattern") {
+            if (renderedPatterns.has(inst.uuid)) return;
+            renderedPatterns.add(inst.uuid);
+            
+            const patternEl = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
+            patternEl.id = inst.uuid;
+            patternEl.setAttribute('width', inst.Width || 10);
+            patternEl.setAttribute('height', inst.Height || 10);
+            if (inst.Transform) patternEl.setAttribute('patternTransform', inst.Transform);
+            if (inst.Units) patternEl.setAttribute('patternUnits', inst.Units);
+            if (inst.PatternContentUnits) patternEl.setAttribute('patternContentUnits', inst.PatternContentUnits);
+            if (inst.Content) patternEl.innerHTML = inst.Content;
+            
+            engine.DOM.defs.appendChild(patternEl);
+            return;
+        }
+        
         if (inst.className === "SVGNode") {
             node = document.createElementNS("http://www.w3.org/2000/svg", inst.Tag);
             node.id = inst.uuid;
@@ -16,6 +84,27 @@ export function syncDOM(engine) {
             if (inst.Attributes) {
                 for (const [key, val] of Object.entries(inst.Attributes)) {
                     node.setAttribute(key, val);
+                }
+            }
+            
+            const uiStroke = inst.children.find(c => c.className === "UIStroke");
+            if (uiStroke) {
+                node.setAttribute('stroke', uiStroke.Color || "#000000");
+                node.setAttribute('stroke-width', uiStroke.Width || 1);
+                if (uiStroke.Opacity !== undefined && uiStroke.Opacity !== 1) {
+                    node.setAttribute('stroke-opacity', uiStroke.Opacity);
+                }
+                if (uiStroke.LineCap && uiStroke.LineCap !== "butt") {
+                    node.setAttribute('stroke-linecap', uiStroke.LineCap);
+                }
+                if (uiStroke.LineJoin && uiStroke.LineJoin !== "miter") {
+                    node.setAttribute('stroke-linejoin', uiStroke.LineJoin);
+                }
+                if (uiStroke.DashArray) {
+                    node.setAttribute('stroke-dasharray', uiStroke.DashArray);
+                }
+                if (uiStroke.DashOffset) {
+                    node.setAttribute('stroke-dashoffset', uiStroke.DashOffset);
                 }
             }
             
@@ -27,11 +116,10 @@ export function syncDOM(engine) {
                 node.style.cursor = "pointer";
                 node.onclick = (e) => { e.stopPropagation(); engine.select(inst); };
                 if (engine.Selected === inst) {
-                    node.style.outline = "2px dashed #00ff00"; // Outline used instead of stroke to preserve complex paths
+                    node.style.outline = "2px dashed #00ff00";
                 }
             }
             
-            // Route definitions to <defs>, renderable graphics to <g> root
             const defTags = ['defs', 'mask', 'clippath', 'lineargradient', 'radialgradient', 'pattern', 'filter'];
             if (defTags.includes(inst.Tag.toLowerCase())) {
                 engine.DOM.defs.appendChild(node);
@@ -189,8 +277,77 @@ async function bundleAllJavaScript() {
     engine.DOM.defs.innerHTML = '';
     if (engine.DOM.debug) engine.DOM.debug.innerHTML = '';
 
+    const renderedGradients = new Set();
+    const renderedPatterns = new Set();
+    let animationStyleInjected = false;
+
     const walk = (inst, parentNode) => {
         let node = parentNode;
+        
+        if (inst.className === "Animation" && !animationStyleInjected) {
+            let styleEl = engine.DOM.defs.querySelector('style#animation-styles');
+            if (!styleEl) {
+                styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
+                styleEl.id = "animation-styles";
+                engine.DOM.defs.appendChild(styleEl);
+            }
+            styleEl.textContent = inst.CSSText || "";
+            animationStyleInjected = true;
+            return;
+        }
+        
+        if (inst.className === "UIGradient") {
+            if (renderedGradients.has(inst.uuid)) return;
+            renderedGradients.add(inst.uuid);
+            
+            let gradEl;
+            if (inst.Type === "Linear") {
+                gradEl = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+                gradEl.setAttribute('x1', inst.X1 || "0%");
+                gradEl.setAttribute('y1', inst.Y1 || "0%");
+                gradEl.setAttribute('x2', inst.X2 || "100%");
+                gradEl.setAttribute('y2', inst.Y2 || "0%");
+            } else {
+                gradEl = document.createElementNS("http://www.w3.org/2000/svg", "radialGradient");
+                gradEl.setAttribute('cx', inst.CX || "50%");
+                gradEl.setAttribute('cy', inst.CY || "50%");
+                gradEl.setAttribute('r', inst.R || "50%");
+            }
+            
+            gradEl.id = inst.uuid;
+            if (inst.Transform) gradEl.setAttribute('gradientTransform', inst.Transform);
+            if (inst.Units) gradEl.setAttribute('gradientUnits', inst.Units);
+            
+            if (inst.ColorStops && Array.isArray(inst.ColorStops)) {
+                inst.ColorStops.forEach(stop => {
+                    const stopEl = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+                    stopEl.setAttribute('offset', stop.offset || "0%");
+                    stopEl.setAttribute('stop-color', stop.color || "#000");
+                    if (stop.opacity) stopEl.setAttribute('stop-opacity', stop.opacity);
+                    gradEl.appendChild(stopEl);
+                });
+            }
+            
+            engine.DOM.defs.appendChild(gradEl);
+            return;
+        }
+        
+        if (inst.className === "Pattern") {
+            if (renderedPatterns.has(inst.uuid)) return;
+            renderedPatterns.add(inst.uuid);
+            
+            const patternEl = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
+            patternEl.id = inst.uuid;
+            patternEl.setAttribute('width', inst.Width || 10);
+            patternEl.setAttribute('height', inst.Height || 10);
+            if (inst.Transform) patternEl.setAttribute('patternTransform', inst.Transform);
+            if (inst.Units) patternEl.setAttribute('patternUnits', inst.Units);
+            if (inst.PatternContentUnits) patternEl.setAttribute('patternContentUnits', inst.PatternContentUnits);
+            if (inst.Content) patternEl.innerHTML = inst.Content;
+            
+            engine.DOM.defs.appendChild(patternEl);
+            return;
+        }
         
         if (inst.className === "SVGNode") {
             node = document.createElementNS("http://www.w3.org/2000/svg", inst.Tag);
@@ -199,6 +356,27 @@ async function bundleAllJavaScript() {
             if (inst.Attributes) {
                 for (const [key, val] of Object.entries(inst.Attributes)) {
                     node.setAttribute(key, val);
+                }
+            }
+            
+            const uiStroke = inst.children.find(c => c.className === "UIStroke");
+            if (uiStroke) {
+                node.setAttribute('stroke', uiStroke.Color || "#000000");
+                node.setAttribute('stroke-width', uiStroke.Width || 1);
+                if (uiStroke.Opacity !== undefined && uiStroke.Opacity !== 1) {
+                    node.setAttribute('stroke-opacity', uiStroke.Opacity);
+                }
+                if (uiStroke.LineCap && uiStroke.LineCap !== "butt") {
+                    node.setAttribute('stroke-linecap', uiStroke.LineCap);
+                }
+                if (uiStroke.LineJoin && uiStroke.LineJoin !== "miter") {
+                    node.setAttribute('stroke-linejoin', uiStroke.LineJoin);
+                }
+                if (uiStroke.DashArray) {
+                    node.setAttribute('stroke-dasharray', uiStroke.DashArray);
+                }
+                if (uiStroke.DashOffset) {
+                    node.setAttribute('stroke-dashoffset', uiStroke.DashOffset);
                 }
             }
             
@@ -331,7 +509,6 @@ async function bundleAllJavaScript() {
     return bundle;
 }
 
-// Full 1:1 Universal SVG Importer for Figma files
 export function importRawSVG(file, onCompleteCb) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -340,23 +517,122 @@ export function importRawSVG(file, onCompleteCb) {
         
         const cleanName = file.name.replace(/\.[^/.]+$/, "");
         const rootFolder = new Instance(`Asset_${cleanName}`, "Folder");
+        
+        let globalAnimationCSS = "";
+        const styleElements = doc.querySelectorAll('style');
+        styleElements.forEach(styleEl => {
+            const cssText = styleEl.textContent || "";
+            if (cssText.includes('@keyframes')) {
+                globalAnimationCSS += cssText + "\n";
+            }
+        });
 
         const parseNode = (svgNode, parentInst) => {
-            if (svgNode.nodeType !== 1) return; // Skip non-elements (text nodes, comments)
+            if (svgNode.nodeType !== 1) return;
             if (svgNode.tagName.toLowerCase() === 'svg') {
                 Array.from(svgNode.children).forEach(child => parseNode(child, parentInst));
                 return;
             }
 
-            const tag = svgNode.tagName;
+            const tag = svgNode.tagName.toLowerCase();
             const inst = new Instance(svgNode.id || tag, "SVGNode");
-            inst.Tag = tag;
+            inst.Tag = svgNode.tagName;
             inst.Attributes = {};
             
-            // Extract every raw attribute (d-paths, stroke-width, matrices, mask refs)
+            const strokeAttrs = {};
+            
             Array.from(svgNode.attributes).forEach(attr => {
-                if (attr.name !== 'id') inst.Attributes[attr.name] = attr.value;
+                const name = attr.name;
+                const value = attr.value;
+                
+                if (name === 'id') return;
+                
+                if (name === 'stroke' || name === 'stroke-width' || name === 'stroke-opacity' || 
+                    name === 'stroke-linecap' || name === 'stroke-linejoin' || 
+                    name === 'stroke-dasharray' || name === 'stroke-dashoffset') {
+                    strokeAttrs[name] = value;
+                } else {
+                    inst.Attributes[name] = value;
+                }
             });
+            
+            if (Object.keys(strokeAttrs).length > 0 && strokeAttrs['stroke'] && strokeAttrs['stroke'] !== 'none') {
+                const uiStroke = new Instance("UIStroke", "UIStroke");
+                uiStroke.Color = strokeAttrs['stroke'] || "#000000";
+                uiStroke.Width = parseFloat(strokeAttrs['stroke-width']) || 1;
+                uiStroke.Opacity = parseFloat(strokeAttrs['stroke-opacity']) || 1;
+                uiStroke.LineCap = strokeAttrs['stroke-linecap'] || "butt";
+                uiStroke.LineJoin = strokeAttrs['stroke-linejoin'] || "miter";
+                uiStroke.DashArray = strokeAttrs['stroke-dasharray'] || "";
+                uiStroke.DashOffset = parseFloat(strokeAttrs['stroke-dashoffset']) || 0;
+                inst.addChild(uiStroke);
+            }
+            
+            if (tag === 'lineargradient') {
+                const gradient = new Instance(svgNode.id || "LinearGradient", "UIGradient");
+                gradient.Type = "Linear";
+                gradient.X1 = inst.Attributes['x1'] || "0%";
+                gradient.Y1 = inst.Attributes['y1'] || "0%";
+                gradient.X2 = inst.Attributes['x2'] || "100%";
+                gradient.Y2 = inst.Attributes['y2'] || "0%";
+                gradient.Transform = inst.Attributes['gradientTransform'] || "";
+                gradient.Units = inst.Attributes['gradientUnits'] || "objectBoundingBox";
+                gradient.ColorStops = [];
+                
+                Array.from(svgNode.children).forEach(child => {
+                    if (child.tagName.toLowerCase() === 'stop') {
+                        gradient.ColorStops.push({
+                            offset: child.getAttribute('offset') || "0%",
+                            color: child.getAttribute('stop-color') || "#000",
+                            opacity: child.getAttribute('stop-opacity') || "1"
+                        });
+                    }
+                });
+                
+                parentInst.addChild(gradient);
+                return;
+            }
+            
+            if (tag === 'radialgradient') {
+                const gradient = new Instance(svgNode.id || "RadialGradient", "UIGradient");
+                gradient.Type = "Radial";
+                gradient.CX = inst.Attributes['cx'] || "50%";
+                gradient.CY = inst.Attributes['cy'] || "50%";
+                gradient.R = inst.Attributes['r'] || "50%";
+                gradient.Transform = inst.Attributes['gradientTransform'] || "";
+                gradient.Units = inst.Attributes['gradientUnits'] || "objectBoundingBox";
+                gradient.ColorStops = [];
+                
+                Array.from(svgNode.children).forEach(child => {
+                    if (child.tagName.toLowerCase() === 'stop') {
+                        gradient.ColorStops.push({
+                            offset: child.getAttribute('offset') || "0%",
+                            color: child.getAttribute('stop-color') || "#000",
+                            opacity: child.getAttribute('stop-opacity') || "1"
+                        });
+                    }
+                });
+                
+                parentInst.addChild(gradient);
+                return;
+            }
+            
+            if (tag === 'pattern') {
+                const pattern = new Instance(svgNode.id || "Pattern", "Pattern");
+                pattern.Width = parseFloat(inst.Attributes['width']) || 10;
+                pattern.Height = parseFloat(inst.Attributes['height']) || 10;
+                pattern.Transform = inst.Attributes['patternTransform'] || "";
+                pattern.Units = inst.Attributes['patternUnits'] || "userSpaceOnUse";
+                pattern.PatternContentUnits = inst.Attributes['patternContentUnits'] || "userSpaceOnUse";
+                pattern.Content = svgNode.innerHTML;
+                
+                parentInst.addChild(pattern);
+                return;
+            }
+            
+            if (tag === 'style') {
+                return;
+            }
 
             if (svgNode.children.length === 0 && svgNode.textContent.trim() !== '') {
                 inst.TextContent = svgNode.textContent.trim();
@@ -367,6 +643,14 @@ export function importRawSVG(file, onCompleteCb) {
         };
 
         parseNode(doc.documentElement, rootFolder);
+        
+        if (globalAnimationCSS.trim() !== "") {
+            const animInst = new Instance("Animations", "Animation");
+            animInst.CSSText = globalAnimationCSS;
+            animInst.Keyframes = {};
+            rootFolder.addChild(animInst);
+        }
+        
         onCompleteCb(rootFolder);
     };
     reader.readAsText(file);

@@ -1,7 +1,6 @@
 export function renderTree(workspace, selectedNode, container, onSelect) {
     container.innerHTML = '';
     
-    // Map class types to UI icons
     const icons = {
         "Folder": "📁",
         "VectorPart": "🟦",
@@ -10,7 +9,11 @@ export function renderTree(workspace, selectedNode, container, onSelect) {
         "Script": "📜",
         "SVGFilter": "✨",
         "ParticleEmitter": "🎇",
-        "SVGNode": "🧩" // Added for SVG Importer
+        "SVGNode": "🎨",
+        "UIGradient": "🌈",
+        "UIStroke": "✏️",
+        "Pattern": "🔲",
+        "Animation": "⚡"
     };
 
     const walk = (inst, parentElement) => {

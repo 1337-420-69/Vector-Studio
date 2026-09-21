@@ -5,7 +5,6 @@ export function renderProps(selectedInst, container, onChange, onDelete) {
         return;
     }
 
-    // 1. Robust Schema with SVGNode Support
     const schema = {
         "Folder": { props: ["name"] },
         "VectorPart": { props: ["name", "Type", "X", "Y", "W", "H", "Color", "FilterID"] },
@@ -14,7 +13,11 @@ export function renderProps(selectedInst, container, onChange, onDelete) {
         "Script": { props: ["name"] },
         "SVGFilter": { props: ["name", "Type", "Amount"] },
         "ParticleEmitter": { props: ["name", "Rate", "Speed"] },
-        "SVGNode": { props: ["name", "Tag", "TextContent"] } // Fix for the Importer crash
+        "SVGNode": { props: ["name", "Tag", "TextContent"] },
+        "UIGradient": { props: ["name", "Type"] },
+        "UIStroke": { props: ["name", "Color", "Width", "Opacity", "LineCap", "LineJoin", "DashArray", "DashOffset"] },
+        "Pattern": { props: ["name", "Width", "Height", "Transform", "Units"] },
+        "Animation": { props: ["name"] }
     };
 
     // 2. Safe Fallback logic
@@ -45,6 +48,33 @@ export function renderProps(selectedInst, container, onChange, onDelete) {
                 if(selectedInst[prop] === opt) o.selected = true;
                 input.appendChild(o);
             });
+        } else if (prop === 'Type' && selectedInst.className === 'UIGradient') {
+            input = document.createElement('select');
+            ['Linear', 'Radial'].forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt; o.innerText = opt;
+                if(selectedInst[prop] === opt) o.selected = true;
+                input.appendChild(o);
+            });
+        } else if (prop === 'LineCap' && selectedInst.className === 'UIStroke') {
+            input = document.createElement('select');
+            ['butt', 'round', 'square'].forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt; o.innerText = opt;
+                if(selectedInst[prop] === opt) o.selected = true;
+                input.appendChild(o);
+            });
+        } else if (prop === 'LineJoin' && selectedInst.className === 'UIStroke') {
+            input = document.createElement('select');
+            ['miter', 'round', 'bevel'].forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt; o.innerText = opt;
+                if(selectedInst[prop] === opt) o.selected = true;
+                input.appendChild(o);
+            });
+        } else if (prop === 'Color') {
+            input.type = 'color';
+            input.value = selectedInst[prop] || '#000000';
         } else if (typeof selectedInst[prop] === 'boolean') {
             input.type = 'checkbox';
             input.checked = selectedInst[prop];
@@ -55,6 +85,7 @@ export function renderProps(selectedInst, container, onChange, onDelete) {
         
         input.onchange = (e) => {
             if (input.type === 'checkbox') selectedInst[prop] = e.target.checked;
+            else if (input.type === 'color') selectedInst[prop] = e.target.value;
             else if (!isNaN(e.target.value) && e.target.value.trim() !== '') selectedInst[prop] = parseFloat(e.target.value);
             else selectedInst[prop] = e.target.value;
             onChange();
@@ -66,7 +97,6 @@ export function renderProps(selectedInst, container, onChange, onDelete) {
         container.appendChild(row);
     });
 
-    // 3. Special visualizer for advanced imported Figma Assets
     if (selectedInst.className === "SVGNode" && selectedInst.Attributes) {
         const attrTitle = document.createElement('div');
         attrTitle.style.fontWeight = 'bold';
@@ -81,6 +111,42 @@ export function renderProps(selectedInst, container, onChange, onDelete) {
             row.innerHTML = `<span style="color:#aaa;">${key}</span> <input type="text" value="${val.replace(/"/g, '&quot;')}" readonly style="background:#222; color:#777; width:60%;">`;
             container.appendChild(row);
         }
+    }
+    
+    if (selectedInst.className === "UIGradient" && selectedInst.ColorStops && Array.isArray(selectedInst.ColorStops)) {
+        const stopsTitle = document.createElement('div');
+        stopsTitle.style.fontWeight = 'bold';
+        stopsTitle.style.margin = '15px 0 5px 0';
+        stopsTitle.style.color = '#888';
+        stopsTitle.innerText = `Color Stops`;
+        container.appendChild(stopsTitle);
+
+        selectedInst.ColorStops.forEach((stop, idx) => {
+            const row = document.createElement('div');
+            row.className = 'prop-row';
+            row.innerHTML = `<span style="color:#aaa;">${idx}</span> <input type="text" value="offset:${stop.offset} color:${stop.color}" readonly style="background:#222; color:#777; width:60%;">`;
+            container.appendChild(row);
+        });
+    }
+    
+    if (selectedInst.className === "Animation" && selectedInst.CSSText) {
+        const cssTitle = document.createElement('div');
+        cssTitle.style.fontWeight = 'bold';
+        cssTitle.style.margin = '15px 0 5px 0';
+        cssTitle.style.color = '#888';
+        cssTitle.innerText = `CSS Animation Text`;
+        container.appendChild(cssTitle);
+
+        const textarea = document.createElement('textarea');
+        textarea.value = selectedInst.CSSText;
+        textarea.style.width = '100%';
+        textarea.style.height = '200px';
+        textarea.style.background = '#222';
+        textarea.style.color = '#777';
+        textarea.style.fontFamily = 'monospace';
+        textarea.style.fontSize = '10px';
+        textarea.readOnly = true;
+        container.appendChild(textarea);
     }
 
     const delBtn = document.createElement('button');
