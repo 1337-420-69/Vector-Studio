@@ -527,6 +527,9 @@ export function importRawSVG(file, onCompleteCb) {
             }
         });
 
+        const gradientIdMap = new Map();
+        const patternIdMap = new Map();
+
         const parseNode = (svgNode, parentInst) => {
             if (svgNode.nodeType !== 1) return;
             if (svgNode.tagName.toLowerCase() === 'svg') {
@@ -568,8 +571,12 @@ export function importRawSVG(file, onCompleteCb) {
                 inst.addChild(uiStroke);
             }
             
+            inst._pendingFill = inst.Attributes['fill'];
+            inst._pendingStroke = strokeAttrs['stroke'];
+            
             if (tag === 'lineargradient') {
-                const gradient = new Instance(svgNode.id || "LinearGradient", "UIGradient");
+                const originalId = svgNode.getAttribute('id');
+                const gradient = new Instance(originalId || "LinearGradient", "UIGradient");
                 gradient.Type = "Linear";
                 gradient.X1 = inst.Attributes['x1'] || "0%";
                 gradient.Y1 = inst.Attributes['y1'] || "0%";
@@ -589,12 +596,17 @@ export function importRawSVG(file, onCompleteCb) {
                     }
                 });
                 
+                if (originalId) {
+                    gradientIdMap.set(originalId, gradient.uuid);
+                }
+                
                 parentInst.addChild(gradient);
                 return;
             }
             
             if (tag === 'radialgradient') {
-                const gradient = new Instance(svgNode.id || "RadialGradient", "UIGradient");
+                const originalId = svgNode.getAttribute('id');
+                const gradient = new Instance(originalId || "RadialGradient", "UIGradient");
                 gradient.Type = "Radial";
                 gradient.CX = inst.Attributes['cx'] || "50%";
                 gradient.CY = inst.Attributes['cy'] || "50%";
@@ -613,18 +625,27 @@ export function importRawSVG(file, onCompleteCb) {
                     }
                 });
                 
+                if (originalId) {
+                    gradientIdMap.set(originalId, gradient.uuid);
+                }
+                
                 parentInst.addChild(gradient);
                 return;
             }
             
             if (tag === 'pattern') {
-                const pattern = new Instance(svgNode.id || "Pattern", "Pattern");
+                const originalId = svgNode.getAttribute('id');
+                const pattern = new Instance(originalId || "Pattern", "Pattern");
                 pattern.Width = parseFloat(inst.Attributes['width']) || 10;
                 pattern.Height = parseFloat(inst.Attributes['height']) || 10;
                 pattern.Transform = inst.Attributes['patternTransform'] || "";
                 pattern.Units = inst.Attributes['patternUnits'] || "userSpaceOnUse";
                 pattern.PatternContentUnits = inst.Attributes['patternContentUnits'] || "userSpaceOnUse";
                 pattern.Content = svgNode.innerHTML;
+                
+                if (originalId) {
+                    patternIdMap.set(originalId, pattern.uuid);
+                }
                 
                 parentInst.addChild(pattern);
                 return;
@@ -643,6 +664,45 @@ export function importRawSVG(file, onCompleteCb) {
         };
 
         parseNode(doc.documentElement, rootFolder);
+        
+        const remapUrlReferences = (inst) => {
+            if (inst.className === "SVGNode") {
+                if (inst._pendingFill) {
+                    const remapped = remapUrlReference(inst._pendingFill, gradientIdMap, patternIdMap);
+                    if (remapped !== inst._pendingFill) {
+                        inst.Attributes['fill'] = remapped;
+                    }
+                    delete inst._pendingFill;
+                }
+                
+                const strokeChild = inst.children.find(c => c.className === "UIStroke");
+                if (strokeChild && inst._pendingStroke) {
+                    const remapped = remapUrlReference(inst._pendingStroke, gradientIdMap, patternIdMap);
+                    if (remapped !== inst._pendingStroke) {
+                        strokeChild.Color = remapped;
+                    }
+                    delete inst._pendingStroke;
+                }
+            }
+            
+            inst.children.forEach(child => remapUrlReferences(child));
+        };
+        
+        const remapUrlReference = (value, gradMap, patMap) => {
+            if (!value || typeof value !== 'string') return value;
+            const match = value.match(/^url\(#(.+)\)$/);
+            if (!match) return value;
+            const oldId = match[1];
+            if (gradMap.has(oldId)) {
+                return `url(#${gradMap.get(oldId)})`;
+            }
+            if (patMap.has(oldId)) {
+                return `url(#${patMap.get(oldId)})`;
+            }
+            return value;
+        };
+        
+        remapUrlReferences(rootFolder);
         
         if (globalAnimationCSS.trim() !== "") {
             const animInst = new Instance("Animations", "Animation");
